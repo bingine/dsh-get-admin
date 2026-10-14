@@ -1,6 +1,6 @@
 {
   "name": "dsh-get-admin",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "private": false,
   "description": "管理员权限的获取 / 复用 / 释放：按需通过 UAC 启动一个常驻提权助手进程（空闲自退、跨进程复用），并把「提权后的进程内存访问」以内存后端的形态提供给其它 DSH 插件",
   "keywords": [
