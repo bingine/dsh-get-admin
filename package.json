@@ -75,6 +75,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/satan9394/dsh-get-admin.git"
+    "url": "git+https://github.com/bingine/dsh-get-admin.git"
+  },
+  "homepage": "https://github.com/bingine/dsh-get-admin#readme",
+  "bugs": {
+    "url": "https://github.com/bingine/dsh-get-admin/issues"
   }
 }
