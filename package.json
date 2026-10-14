@@ -1,0 +1,80 @@
+{
+  "name": "dsh-get-admin",
+  "version": "1.0.2",
+  "private": false,
+  "description": "管理员权限的获取 / 复用 / 释放：按需通过 UAC 启动一个常驻提权助手进程（空闲自退、跨进程复用），并把「提权后的进程内存访问」以内存后端的形态提供给其它 DSH 插件",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "elevation",
+    "uac",
+    "administrator",
+    "windows"
+  ],
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./service": {
+      "default": "./lib/service.js"
+    },
+    "./launch": {
+      "default": "./lib/launch.js"
+    },
+    "./elevation": {
+      "default": "./lib/elevation.js"
+    },
+    "./helper": {
+      "default": "./lib/helper.js"
+    },
+    "./protocol": {
+      "default": "./lib/protocol.js"
+    },
+    "./backend": {
+      "default": "./lib/backend.js"
+    },
+    "./toolkit": {
+      "default": "./lib/toolkit.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-commands",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    }
+  },
+  "files": [
+    "lib",
+    "icons",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "os": [
+    "win32"
+  ],
+  "scripts": {
+    "check": "node --check lib/index.js && node --check lib/service.js && node --check lib/elevation.js && node --check lib/helper.js && node --check lib/launch.js && node --check lib/backend.js && node --check lib/worker.js && node --check lib/protocol.js && node --check lib/client.js && node --check lib/toolkit.js",
+    "test": "node test/run-tests.mjs",
+    "test:raw": "node --test --test-force-exit test/*.test.mjs",
+    "verify": "node tools/verify-elevation.mjs"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "koffi": "^2.10.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/satan9394/dsh-get-admin.git"
+  }
+}

@@ -1,0 +1,7 @@
+# 依赖
+node_modules/
+*.log
+
+# 发布前备份（package.json.bak-publish 等）
+*.bak-*
+package.json.bak-*
