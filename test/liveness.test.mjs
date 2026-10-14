@@ -3,7 +3,8 @@
  *
  * ## 为什么 get-admin 必须有这个方法
  *
- * 消费方（dsh-cheat-engine）的 `elevation-backend.js` **优先用本插件的助手**。
+ * 消费方（插件包 `dsh-ce-tools`，仓库目录可能叫 `dsh-cheat-engine`）的
+ * `elevation-backend.js` **优先用本插件的助手**。
  * 而内核 `Process.isProcessAlive()` 在 `backend.isProcessAlive` 不是函数时
  * 如实返回 `undefined`，消费方的会话层把 `undefined` 当「未知」放行 ——
  * 于是目标一退出，远程后端下：

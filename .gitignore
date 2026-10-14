@@ -5,3 +5,6 @@ node_modules/
 # 发布前备份（package.json.bak-publish 等）
 *.bak-*
 package.json.bak-*
+
+# 本地一次性脚本（改名/探针等）
+tmp-*

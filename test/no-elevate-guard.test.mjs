@@ -48,7 +48,7 @@ test("闸门：get-admin 的提权启动被拒绝，且明确说明原因", asyn
 	const error = await withGuard(() =>
 		startHelperBackend({
 			elevate: true,
-			kernelPath: "D:\\Project\\dsh-cheat-engine\\node-cheat-engine",
+			kernelPath: path.join(CHEAT_ENGINE, "node-cheat-engine"),
 			timeoutMs: 5_000,
 			launchTimeoutMs: 5_000,
 			discoverExisting: false
