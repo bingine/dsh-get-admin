@@ -212,9 +212,16 @@ async function mount(options = {}) {
 		}
 	};
 
-	/** `/get-admin/status` 的可控返回；测试可以随时改 `state.admin`。 */
+	/** `/get-admin/status` 的可控返回；测试可以随时改。 */
 	const fetchCalls = [];
 	let statusAdmin = options.admin ?? null;
+	/**
+	 * `POST /get-admin/control`（释放）的响应。
+	 *
+	 * 默认是"释放成功、已无权限"。测试可以把它换成**挂起的 Promise** ——
+	 * 否则 `await` 一下就过去了，根本观察不到 `busy === true` 的中间态。
+	 */
+	let releaseResponder = async () => ({ ok: true, admin: { helperElevated: false } });
 	const sandbox = {
 		window: { __ModuleLoader__: loader },
 		document: dom.document,
@@ -224,11 +231,9 @@ async function mount(options = {}) {
 		clearInterval: () => {},
 		fetch: async (url, init) => {
 			fetchCalls.push({ url, init });
-			return {
-				ok: true,
-				status: 200,
-				json: async () => ({ ok: true, admin: statusAdmin })
-			};
+			const isRelease = String(url).includes("/control");
+			const body = isRelease ? await releaseResponder() : { ok: true, admin: statusAdmin };
+			return { ok: true, status: 200, json: async () => body };
 		}
 	};
 	sandbox.globalThis = sandbox;
@@ -266,6 +271,10 @@ async function mount(options = {}) {
 	const root = dom.document.getElementById("get-admin-layer");
 	assert.ok(root !== null, "挂载后 document 里应当有 #get-admin-layer");
 
+	// ⚠️ 必须**同步**捕获这一瞬间的可见性：`mount()` 本身是 async，
+	// 等到测试函数里再读，微任务队列可能已经让首次 tick 跑完了。
+	const initialVisibility = root.style.visibility;
+
 	const button = root.children[0];
 	const img = button.children[0];
 	const span = button.children[1];
@@ -283,10 +292,15 @@ async function mount(options = {}) {
 		span,
 		cleanup,
 		drain,
+		initialVisibility,
 		slot: opts.name,
 		fetchCalls,
 		setStatus(next) {
 			statusAdmin = next;
+		},
+		/** 换掉下一次 `POST /get-admin/control` 的响应；给函数就支持挂起。 */
+		setRelease(next) {
+			releaseResponder = typeof next === "function" ? next : async () => next;
 		},
 		/** 模拟"页面重新可见"→ 重新调度一轮 tick。 */
 		async tickAgain() {
@@ -297,6 +311,21 @@ async function mount(options = {}) {
 }
 //#endregion
 
+/**
+ * 卸载；**不让 teardown 的异常淹没真正的断言失败**。
+ *
+ * 这些用例都把 `cleanup()` 放在 `finally` 里 —— 一旦 teardown 自己抛错，
+ * 会**所有用例一起变红**，掩盖掉真正失败的那一条。所以这里吞掉并单独打印；
+ * "teardown 该不该抛错"由专门的"卸载"用例断言。
+ */
+function unmountQuietly(m) {
+	try {
+		m.cleanup();
+	} catch (error) {
+		console.error("[测试] 卸载时抛错（另有专门用例覆盖这一点）：", error);
+	}
+}
+
 test("挂载后：右下角定位必须**内联**在容器上（不靠样式表）", async () => {
 	const m = await mount();
 	try {
@@ -304,9 +333,12 @@ test("挂载后：右下角定位必须**内联**在容器上（不靠样式表�
 		assert.equal(m.root.style.position, "fixed", "容器必须是固定定位");
 		assert.equal(m.root.style.right, "16px", "必须贴右边（而非落到左下角的普通流）");
 		assert.equal(m.root.style.bottom, "18px", "必须贴底部");
-		assert.ok(
-			Number(m.root.style.zIndex) > 0,
-			`容器必须有正的 z-index（否则会被界面盖住），实际：${m.root.style.zIndex}`
+		// z-index 必须**足够高**才不会被宿主自己的浮层盖住。
+		// （原来写的是 `Number(...) > 0`，实测把值改成 "1" 也照样 4/4 通过 —— 抓不住。）
+		assert.equal(
+			m.root.style.zIndex,
+			"2147483000",
+			`z-index 必须与设计值一致，实际：${m.root.style.zIndex}`
 		);
 
 		// 容器不吃点击、按钮吃点击 —— 否则要么挡住右下角的界面，要么按钮点不动。
@@ -314,7 +346,7 @@ test("挂载后：右下角定位必须**内联**在容器上（不靠样式表�
 		assert.equal(m.button.style.pointerEvents, "auto", "按钮必须可点");
 		assert.equal(m.button.style.cursor, "pointer", "按钮应显示可点光标");
 	} finally {
-		m.cleanup();
+		unmountQuietly(m);
 	}
 });
 
@@ -342,21 +374,25 @@ test("用户场景重演：文档里**一个 `<style>` 都没有**时，浮层�
 		assert.equal(m.img.style.width, "22px", "图标宽度也应内联（否则会撑成原始尺寸）");
 		assert.equal(m.img.style.height, "22px");
 	} finally {
-		m.cleanup();
+		unmountQuietly(m);
 	}
 });
 
-test("状态外观内联：有权限时橙色描边、无权限时灰度、忙碌时降透明", async () => {
+test("状态外观内联：有权限时橙色描边、无权限时灰度", async () => {
 	const m = await mount({ admin: { helperElevated: false } });
 	try {
 		await m.drain();
 
 		// 未提权：灰掉、无描边。
 		assert.equal(m.button.dataset.admin, "false");
-		assert.equal(m.button.style.filter, "grayscale(.35)", "未提权应灰度显示");
+		// ⚠️ 必须是 `0.35` 而不是 `.35`：真实浏览器会把 `.35` 归一化成 `0.35`，
+		// 断言 `.35` 只在 DOM 桩里成立（产品侧也已统一写成 0.35）。
+		assert.equal(m.button.style.filter, "grayscale(0.35)", "未提权应灰度显示");
 		assert.equal(m.button.style.borderColor, "transparent", "未提权不应有描边");
 		assert.equal(m.root.style.visibility, "visible", "已查到状态后应当可见");
 		assert.match(m.img.src, /no-admin$/, "未提权应显示 no-admin 图标");
+		assert.equal(m.button.title, "未获得管理员权限");
+		assert.equal(m.button.getAttribute("aria-label"), "管理员权限：未获得");
 
 		// 切到已提权：出现橙色描边与底色、灰度解除。
 		m.setStatus({ helperElevated: true });
@@ -366,8 +402,10 @@ test("状态外观内联：有权限时橙色描边、无权限时灰度、忙�
 		assert.notEqual(m.button.style.borderColor, "transparent", "已提权应有描边");
 		assert.notEqual(m.button.style.background, "transparent", "已提权应有底色");
 		assert.match(m.img.src, /admin$/, "已提权应显示 admin 图标");
+		assert.equal(m.button.title, "已获得管理员权限 · 点击释放");
+		assert.equal(m.button.getAttribute("aria-label"), "管理员权限：已获得");
 	} finally {
-		m.cleanup();
+		unmountQuietly(m);
 	}
 });
 
@@ -380,8 +418,9 @@ test("卸载：拆干净且不抛错（历史上这里引用了已被删掉的 s
 	assert.ok(m.button.listenerCount("click") > 0, "挂载期间应有 click 监听");
 	assert.ok(m.dom.document.documentListenerCount("visibilitychange") > 0, "挂载期间应有可见性监听");
 
-	// ⚠️ 这里曾经抛 `ReferenceError: style is not defined` ——
-	//    因为 `const style` 被删了、`style.remove()` 还在。
+	// 卸载必须安全。**注意这条断言的局限**：它区分不了"改成内联样式"的前后 ——
+	// 已发布的 1.0.2 里 teardown 本身也是好的（它只删自己建的东西）。
+	// 它守的是"别再出现引用已删除变量"这类中途态；真正钉住本次修复的是前两条用例。
 	assert.doesNotThrow(() => m.cleanup(), "卸载必须是安全的");
 
 	assert.equal(m.dom.document.getElementById("get-admin-layer"), null, "卸载后容器必须被摘掉");
@@ -392,4 +431,79 @@ test("卸载：拆干净且不抛错（历史上这里引用了已被删掉的 s
 		0,
 		"卸载后应摘掉可见性监听"
 	);
+});
+
+test("首次 tick 之前必须已经隐藏（否则会闪一下「未提权」）", async () => {
+	const m = await mount({ admin: { helperElevated: true } });
+	try {
+		// 同步捕获的那一瞬间：`tick()` 还卡在 await fetch，`state` 仍是 undefined。
+		// 后台标签页里 `schedule()` 根本不 tick，这个窗口会一直持续到用户切回来。
+		assert.equal(
+			m.initialVisibility,
+			"hidden",
+			"挂载到首次 tick 之间是异步窗口，容器必须已经隐藏 —— 否则会先闪一个「未提权」图标，而真实状态可能是已提权"
+		);
+		await m.drain();
+		assert.equal(m.root.style.visibility, "visible", "查到状态之后才放出来");
+	} finally {
+		unmountQuietly(m);
+	}
+});
+
+test("点击释放：忙碌期间按钮禁用并降透明，完成后恢复", async () => {
+	const m = await mount({ admin: { helperElevated: true } });
+	try {
+		await m.drain();
+		assert.equal(m.button.dataset.admin, "true");
+		assert.equal(m.button.disabled, false, "空闲时应可点");
+		assert.equal(m.button.style.cursor, "pointer");
+		assert.equal(m.button.style.opacity, "1");
+
+		// 把释放请求**挂起**，否则 await 一下就过去了、根本观察不到忙碌中间态
+		let finishRelease = () => {};
+		m.setRelease(
+			() =>
+				new Promise((resolve) => {
+					finishRelease = resolve;
+				})
+		);
+		m.button.dispatch("click");
+		await m.drain();
+
+		assert.equal(m.button.disabled, true, "忙碌期间必须禁用（否则用户能连点）");
+		assert.equal(m.button.style.cursor, "default", "忙碌期间光标不该还是可点手型");
+		assert.equal(m.button.style.opacity, "0.6", "忙碌期间应降透明");
+
+		finishRelease({ ok: true, admin: { helperElevated: false } });
+		await m.drain();
+
+		assert.equal(m.button.disabled, false, "释放完成后必须恢复可点");
+		assert.equal(m.button.style.cursor, "pointer");
+		assert.equal(m.button.style.opacity, "1");
+		assert.equal(m.button.dataset.admin, "false", "释放后应变成未提权");
+		assert.equal(m.button.style.filter, "grayscale(0.35)");
+	} finally {
+		unmountQuietly(m);
+	}
+});
+
+test("释放返回 null（状态未知）时，按钮不会卡在 disabled / 半透明", async () => {
+	// 这是**实测过的真实路径**：`releaseAdmin()` 回 `{ admin: null }` 时，
+	// 产品把 `state` 置成 null → `applyState()` 走 `!known` 早退。
+	// 若 busy 相关外观写在早退之后，按钮就永远停在 disabled / 0.6 / default 上
+	// （容器同时被隐藏所以用户看不见，但要等下一次成功 tick 才自愈）。
+	const m = await mount({ admin: { helperElevated: true } });
+	try {
+		await m.drain();
+		m.setRelease({ ok: true, admin: null });
+		m.button.dispatch("click");
+		await m.drain();
+
+		assert.equal(m.button.disabled, false, "busy 已结束，必须恢复可点");
+		assert.equal(m.button.style.opacity, "1", "busy 已结束，不该还是半透明");
+		assert.equal(m.button.style.cursor, "pointer", "busy 已结束，光标应恢复");
+		assert.equal(m.root.style.visibility, "hidden", "状态未知应把容器藏起来");
+	} finally {
+		unmountQuietly(m);
+	}
 });
